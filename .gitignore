@@ -37,6 +37,9 @@
 *.exe
 *.out
 *.app
+*.user
+
+.qtcreator/
 
 # Build directories
 build/
