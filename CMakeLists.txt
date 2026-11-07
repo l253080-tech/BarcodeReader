@@ -17,8 +17,8 @@ qt_add_executable(BarcodeReader
     app/readtab.cpp
 
     # Core logic (member 2). Uncomment after his branch is merged into main:
-    # src/Barcode_Encoder.cpp
-    # src/Barcode_Decoder.cpp
+     src/Barcode_Encoder.cpp
+     src/Barcode_Decoder.cpp
 )
 
 target_include_directories(BarcodeReader PRIVATE ${CMAKE_SOURCE_DIR}/src)
