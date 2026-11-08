@@ -3,13 +3,26 @@
 
 #include <QWidget>
 
-// Generate tab: 6-digit input, barcode drawing, Save as PNG.
+class QLineEdit;
+class QPushButton;
+class QLabel;
+
 class GenerateTab : public QWidget
 {
     Q_OBJECT
 
 public:
     explicit GenerateTab(QWidget *parent = nullptr);
+
+private:
+    QLineEdit *numberInput;
+
+    QPushButton *generateButton;
+    QPushButton *saveButton;
+
+    QLabel *barcodePreview;
+    QLabel *barcodeNumber;
+    QLabel *messageLabel;
 };
 
 #endif // GENERATETAB_H
