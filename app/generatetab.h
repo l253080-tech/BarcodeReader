@@ -1,7 +1,9 @@
+
 #ifndef GENERATETAB_H
 #define GENERATETAB_H
 
 #include <QWidget>
+#include <QPixmap>
 
 class QLineEdit;
 class QPushButton;
@@ -23,6 +25,8 @@ private:
     QLabel *barcodePreview;
     QLabel *barcodeNumber;
     QLabel *messageLabel;
+
+    QPixmap barcodeImage;
 };
 
 #endif // GENERATETAB_H
