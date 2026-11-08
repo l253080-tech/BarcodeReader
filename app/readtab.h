@@ -1,15 +1,31 @@
+
+
 #ifndef READTAB_H
 #define READTAB_H
 
 #include <QWidget>
+#include <QString>
+class QLabel;
+class QPushButton;
 
-// Read tab: upload an image or use the camera, then show the decoded 6 digits.
 class ReadTab : public QWidget
 {
     Q_OBJECT
 
 public:
     explicit ReadTab(QWidget *parent = nullptr);
+
+private:
+    QPushButton *uploadButton;
+    QPushButton *decodeButton;
+
+    QLabel *imagePreview;
+    QLabel *fileNameLabel;
+    QLabel *resultHeading;
+    QLabel *resultLabel;
+    QLabel *messageLabel;
+
+    QString imagePath;
 };
 
 #endif // READTAB_H
