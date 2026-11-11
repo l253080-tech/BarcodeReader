@@ -1,5 +1,3 @@
-
-
 #ifndef READTAB_H
 #define READTAB_H
 
@@ -17,6 +15,7 @@ public:
 
 private:
     QPushButton *uploadButton;
+    QPushButton *cameraButton;
     QPushButton *decodeButton;
 
     QLabel *imagePreview;

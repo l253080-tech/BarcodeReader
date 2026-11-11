@@ -4,6 +4,7 @@
 
 bool BarcodeEncoder::isValid(const std::string& s) {
     if (s.size() != 6) return false;
+    if (s[0]=='0') return false;
     for (char c : s)
         if (!std::isdigit((unsigned char)c)) return false;
     return true;
@@ -12,6 +13,7 @@ bool BarcodeEncoder::isValid(const std::string& s) {
 // Code 128 checksum: (105 + 1*v1 + 2*v2 + 3*v3) mod 103, where v1..v3 are the digit pairs
 int BarcodeEncoder::checksum(const std::string& s) {
     if (s.size() != 6) return -1;
+
     int sum = START_C;
     for (int i = 0; i < 3; ++i) {
         int value = (s[2 * i] - '0') * 10 + (s[2 * i + 1] - '0');
