@@ -15,15 +15,19 @@ qt_add_executable(BarcodeReader
     app/generatetab.cpp
     app/readtab.h
     app/readtab.cpp
+    app/cameradialog.h
+    app/cameradialog.cpp
 
     # Core logic (member 2)
     src/Barcode_Encoder.cpp
     src/Barcode_Encoder.h
-
     src/Barcode_Decoder.cpp
     src/Barcode_Decoder.h
-
     src/Barcode_Tabels.h
+
+    # Image scanner (member 4)
+    src/ImageScanner.cpp
+    src/ImageScanner.h
 )
 
 target_include_directories(BarcodeReader PRIVATE ${CMAKE_SOURCE_DIR}/src)
