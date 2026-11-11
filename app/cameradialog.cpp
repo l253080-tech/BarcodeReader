@@ -15,7 +15,7 @@ CameraDialog::CameraDialog(QWidget *parent)
 {
     setWindowTitle("Camera");
     resize(640, 520);
-
+//n
     auto *layout = new QVBoxLayout(this);
 
     m_status = new QLabel("Point the camera at the barcode and press Capture.", this);
