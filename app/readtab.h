@@ -5,13 +5,20 @@
 #include <QString>
 class QLabel;
 class QPushButton;
+class ProductManager;
 
 class ReadTab : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit ReadTab(QWidget *parent = nullptr);
+    ReadTab(ProductManager &products, const QString &dataDirectory, QWidget *parent = nullptr);
+
+public slots:
+    void startCameraScan(bool directToPos = false);
+
+signals:
+    void barcodeDecoded(const QString &barcode);
 
 private:
     QPushButton *uploadButton;
@@ -25,6 +32,10 @@ private:
     QLabel *messageLabel;
 
     QString imagePath;
+    ProductManager &products_;
+    QString dataDirectory_;
+    bool directToPos_ = false;
+    void decodeCurrentImage();
 };
 
 #endif // READTAB_H

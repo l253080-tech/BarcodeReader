@@ -10,6 +10,8 @@
 #include <QRegularExpressionValidator>
 #include <QPainter>
 #include <QFileDialog>
+#include <QCoreApplication>
+#include <QDir>
 
 GenerateTab::GenerateTab(QWidget *parent)
     : QWidget(parent)
@@ -165,10 +167,13 @@ GenerateTab::GenerateTab(QWidget *parent)
     // Save barcode as PNG
     connect(saveButton, &QPushButton::clicked, this, [this]() {
 
+        const QString barcodeDirectory = QDir(QCoreApplication::applicationDirPath()).filePath("barcodes");
+        QDir().mkpath(barcodeDirectory);
+
         QString path = QFileDialog::getSaveFileName(
             this,
             "Save Barcode",
-            "barcode.png",
+            QDir(barcodeDirectory).filePath("barcode.png"),
             "PNG Image (*.png)"
             );
 

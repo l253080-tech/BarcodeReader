@@ -43,6 +43,8 @@ public:
 
     OrderResult holdOrder();
     OrderResult resumeOrder(const std::string& orderId);
+    // Restores a persisted on-hold order at startup without changing its contents.
+    bool restoreHeldOrder(const Order& order);
     OrderResult cancelOrder();                     // discards the current order
     const std::map<std::string, Order>& getHeldOrders() const { return held_; }
 

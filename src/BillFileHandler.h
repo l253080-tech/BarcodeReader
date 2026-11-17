@@ -14,6 +14,7 @@ public:
     vector<Bill> loadBills() const;
     optional<Bill> findBillById(const string& billId) const;
     bool validateBillRecord(const Bill& bill) const;
+    const string& billFilePath() const { return billFilePath_; }
 
 private:
     static string encodeToken(const string& raw);

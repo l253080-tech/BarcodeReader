@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets PrintSupport)
 
 # ---------------------------------------------------------------------------
 # Product module (member 1) - plain C++, no Qt
@@ -71,9 +71,10 @@ endif()
 # Copies Product.txt next to a target's executable so it can be opened at runtime
 function(copy_product_data target)
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${PRODUCT_DATA_FILE}"
-            "$<TARGET_FILE_DIR:${target}>/Product.txt")
+        COMMAND ${CMAKE_COMMAND}
+            "-DPRODUCT_SOURCE=${PRODUCT_DATA_FILE}"
+            "-DPRODUCT_DEST=$<TARGET_FILE_DIR:${target}>/Product.txt"
+            -P "${CMAKE_SOURCE_DIR}/cmake/CopyProductDataIfMissing.cmake")
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -83,6 +84,12 @@ qt_add_executable(BarcodeReader
     app/main.cpp
     app/mainwindow.h
     app/mainwindow.cpp
+    app/postab.h
+    app/postab.cpp
+    app/billdialog.h
+    app/billdialog.cpp
+    app/productdetails.h
+    app/productdetails.cpp
     app/generatetab.h
     app/generatetab.cpp
     app/readtab.h
@@ -108,6 +115,7 @@ target_link_libraries(BarcodeReader PRIVATE
     Qt6::Widgets
     Qt6::Multimedia
     Qt6::MultimediaWidgets
+    Qt6::PrintSupport
     ProductModule
     OrderModule
     OrderProductAdapter
@@ -132,11 +140,20 @@ add_test(NAME OrderManagerTest COMMAND OrderManagerTest)
 add_executable(OrderIntegrationTest tests/OrderIntegrationTest.cpp)
 target_link_libraries(OrderIntegrationTest PRIVATE OrderProductAdapter)
 copy_product_data(OrderIntegrationTest)
+set(ORDER_INTEGRATION_TEST_DIR "${CMAKE_BINARY_DIR}/test-data/order-integration")
+file(MAKE_DIRECTORY "${ORDER_INTEGRATION_TEST_DIR}")
+configure_file("${PRODUCT_DATA_FILE}" "${ORDER_INTEGRATION_TEST_DIR}/Product.txt" COPYONLY)
 add_test(NAME OrderIntegrationTest COMMAND OrderIntegrationTest
-         WORKING_DIRECTORY $<TARGET_FILE_DIR:OrderIntegrationTest>)
+         WORKING_DIRECTORY "${ORDER_INTEGRATION_TEST_DIR}")
 
 add_executable(BillingTest tests/BillingTest.cpp)
 target_link_libraries(BillingTest PRIVATE BillingModule OrderProductAdapter)
 copy_product_data(BillingTest)
 add_test(NAME BillingTest COMMAND BillingTest
          WORKING_DIRECTORY $<TARGET_FILE_DIR:BillingTest>)
+
+add_executable(OrderPersistenceTest tests/OrderPersistenceTest.cpp)
+target_link_libraries(OrderPersistenceTest PRIVATE BillingModule OrderProductAdapter)
+copy_product_data(OrderPersistenceTest)
+add_test(NAME OrderPersistenceTest COMMAND OrderPersistenceTest
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:OrderPersistenceTest>)

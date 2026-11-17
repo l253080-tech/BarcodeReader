@@ -181,7 +181,9 @@ bool BillFileHandler::writeLinesAtomic(const string& targetPath, const vector<st
             out << l << "\n";
         }
         out.flush();
-        if (!out.good()) {
+        const bool flushed = out.good();
+        out.close();
+        if (!flushed || out.fail()) {
             return false;
         }
     }

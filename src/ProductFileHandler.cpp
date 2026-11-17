@@ -6,10 +6,10 @@
 #include <sstream>
 
 ProductFileHandler::ProductFileHandler(const std::string& filePath)
-    : filePath(filePath) {}
+    : filePath_(filePath) {}
 
 bool ProductFileHandler::isFileAvailable() const {
-    std::ifstream file(filePath);
+    std::ifstream file(filePath_);
     return file.is_open();
 }
 
@@ -43,7 +43,7 @@ bool ProductFileHandler::parseProductLine(const std::string& rawLine, Product& o
 
 std::vector<Product> ProductFileHandler::loadProducts() const {
     std::vector<Product> products;
-    std::ifstream file(filePath);
+    std::ifstream file(filePath_);
     if (!file.is_open()) return products;
 
     std::string line;
@@ -65,16 +65,18 @@ std::string ProductFileHandler::formatProductLine(const Product& p) const {
 }
 
 bool ProductFileHandler::writeLines(const std::vector<std::string>& lines) const {
-    std::string tempPath = filePath + ".tmp";
+    std::string tempPath = filePath_ + ".tmp";
     {
         std::ofstream out(tempPath, std::ios::trunc);
         if (!out.is_open()) return false;
         for (const auto& l : lines) out << l << "\n";
         out.flush();
-        if (!out.good()) return false;
+        const bool flushed = out.good();
+        out.close();
+        if (!flushed || out.fail()) return false;
     }
     std::error_code ec;
-    std::filesystem::rename(tempPath, filePath, ec);
+    std::filesystem::rename(tempPath, filePath_, ec);
     if (ec) {
         std::filesystem::remove(tempPath, ec);
         return false;
@@ -89,7 +91,7 @@ bool ProductFileHandler::saveProducts(const std::vector<Product>& products) cons
 }
 
 bool ProductFileHandler::updateProductRecord(const Product& product) const {
-    std::ifstream in(filePath);
+    std::ifstream in(filePath_);
     if (!in.is_open()) return false;
 
     std::vector<std::string> lines;

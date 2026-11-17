@@ -3,7 +3,8 @@
 #include "cameradialog.h"
 #include "ImageScanner.h"
 #include "Barcode_Decoder.h"
-#include <QStandardPaths>
+#include "ProductManager.h"
+#include "productdetails.h"
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -14,12 +15,13 @@
 #include <QDir>
 #include <QImage>
 #include <QImageReader>
+#include <QMessageBox>
 
 #include <string>
 #include <vector>
 
-ReadTab::ReadTab(QWidget *parent)
-    : QWidget(parent)
+ReadTab::ReadTab(ProductManager &products, const QString &dataDirectory, QWidget *parent)
+    : QWidget(parent), products_(products), dataDirectory_(dataDirectory)
 {
     // Main layout
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
@@ -143,27 +145,37 @@ ReadTab::ReadTab(QWidget *parent)
     });
 
     // Use camera functionality
-    connect(cameraButton, &QPushButton::clicked, this, [this]() {
+    connect(cameraButton, &QPushButton::clicked, this, [this] { startCameraScan(false); });
+
+    // Decode functionality: image -> widths -> 6 digits -> result label
+    connect(decodeButton, &QPushButton::clicked, this, &ReadTab::decodeCurrentImage);
+}
+
+void ReadTab::startCameraScan(bool directToPos)
+{
+        directToPos_ = directToPos;
         CameraDialog dialog(this);
 
         // User closed the camera without capturing
-        if (dialog.exec() != QDialog::Accepted)
+        if (dialog.exec() != QDialog::Accepted) {
+            directToPos_ = false;
             return;
+        }
 
         QImage captured = dialog.capturedImage();
         if (captured.isNull()) {
             messageLabel->setText("Error: No picture was captured.");
+            directToPos_ = false;
             return;
         }
 
         // Save to a temporary file so it follows the same path as an uploaded image
         // Change this folder to wherever you want the captures saved
-        QString folder = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)
-                         + "/BarcodeReader";
-        QDir().mkpath(folder);                         // create the folder if missing
-        QString path = folder + "/camera_capture.png";
+        QDir().mkpath(dataDirectory_);
+        QString path = QDir(dataDirectory_).filePath("camera_capture.png");
         if (!captured.save(path)) {
             messageLabel->setText("Error: Unable to save the captured picture.");
+            directToPos_ = false;
             return;
         }
 
@@ -188,14 +200,13 @@ ReadTab::ReadTab(QWidget *parent)
 
         // Clear previous messages/results
         resultLabel->setText("------");
-        messageLabel->setText("Picture captured. Press Process / Decode.");
+        messageLabel->setText("Picture captured. Scanning barcode...");
+        decodeCurrentImage();
+        directToPos_ = false;
+}
 
-
-    });
-
-    // Decode functionality: image -> widths -> 6 digits -> result label
-    connect(decodeButton, &QPushButton::clicked, this, [this]() {
-
+void ReadTab::decodeCurrentImage()
+{
         // Load image, applying EXIF rotation (important for phone photos)
         QImageReader reader(imagePath);
         reader.setAutoTransform(true);
@@ -204,6 +215,7 @@ ReadTab::ReadTab(QWidget *parent)
         if (image.isNull()) {
             resultLabel->setText("------");
             messageLabel->setText("Error: Unable to read the image.");
+            if (directToPos_) QMessageBox::warning(this, "Barcode scan", messageLabel->text());
             return;
         }
 
@@ -212,6 +224,7 @@ ReadTab::ReadTab(QWidget *parent)
         if (widths.empty()) {
             resultLabel->setText("------");
             messageLabel->setText("No barcode found. Try a clearer, straighter image.");
+            if (directToPos_) QMessageBox::warning(this, "Barcode scan", messageLabel->text());
             return;
         }
 
@@ -220,10 +233,21 @@ ReadTab::ReadTab(QWidget *parent)
         if (digits.empty()) {
             resultLabel->setText("------");
             messageLabel->setText("Barcode found but could not be decoded (pattern/checksum error).");
+            if (directToPos_) QMessageBox::warning(this, "Barcode scan", messageLabel->text());
             return;
         }
 
         resultLabel->setText(QString::fromStdString(digits));
         messageLabel->setText("Barcode decoded successfully.");
-    });
+        emit barcodeDecoded(QString::fromStdString(digits));
+        if (!directToPos_) {
+            const auto product = products_.findByBarcode(digits);
+            if (product) {
+                QMessageBox::information(this, "Product details",
+                    formatProductDetails(*product, dataDirectory_));
+            } else {
+                QMessageBox::warning(this, "Product lookup",
+                    "Barcode decoded, but no product is registered for " + QString::fromStdString(digits) + ".");
+            }
+        }
 }

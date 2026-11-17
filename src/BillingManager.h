@@ -80,6 +80,7 @@ public:
     double getChangeReturned() const {
         return changeReturned_;
     }
+    const string& getLastPersistenceErrorPath() const { return lastPersistenceErrorPath_; }
 
 private:
     ProductManager& productManager_;
@@ -93,4 +94,5 @@ private:
     PaymentMode paymentMode_ = PaymentMode::NotSet;
     string merchantName_;
     double changeReturned_ = 0.0;
+    string lastPersistenceErrorPath_;
 };

@@ -131,6 +131,19 @@ OrderResult OrderManager::resumeOrder(const std::string& orderId) {
     return OrderResult::Success;
 }
 
+bool OrderManager::restoreHeldOrder(const Order& order) {
+    if (order.getOrderId().empty() || order.getOrderStatus() != OrderStatus::OnHold
+        || order.getItems().empty() || held_.count(order.getOrderId()) != 0) {
+        return false;
+    }
+    Order restored = order;
+    restored.setOrderStatus(OrderStatus::OnHold);
+    restored.unlock();
+    idGenerator_.registerExistingId(restored.getOrderId());
+    held_.emplace(restored.getOrderId(), std::move(restored));
+    return true;
+}
+
 OrderResult OrderManager::cancelOrder() {
     if (!hasActiveOrder()) return OrderResult::NoActiveOrder;
     current_.reset();
