@@ -45,16 +45,39 @@ add_library(OrderProductAdapter STATIC
 )
 target_link_libraries(OrderProductAdapter PUBLIC OrderModule ProductModule)
 
+# ---------------------------------------------------------------------------
+# Billing & File Management module (member 4) - plain C++, no Qt
+# ---------------------------------------------------------------------------
+add_library(BillingModule STATIC
+    src/Bill.h
+    src/Bill.cpp
+    src/OrderFileHandler.h
+    src/OrderFileHandler.cpp
+    src/BillFileHandler.h
+    src/BillFileHandler.cpp
+    src/BillingManager.h
+    src/BillingManager.cpp
+)
+target_include_directories(BillingModule PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(BillingModule PUBLIC ProductModule OrderModule)
+
+# Locate Product.txt whether it sits in Product_module/ or at the repo root
+if(EXISTS "${CMAKE_SOURCE_DIR}/Product_module/Product.txt")
+    set(PRODUCT_DATA_FILE "${CMAKE_SOURCE_DIR}/Product_module/Product.txt")
+else()
+    set(PRODUCT_DATA_FILE "${CMAKE_SOURCE_DIR}/Product.txt")
+endif()
+
 # Copies Product.txt next to a target's executable so it can be opened at runtime
 function(copy_product_data target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/Product.txt"
-            "$<TARGET_FILE_DIR:${target}>")
+            "${PRODUCT_DATA_FILE}"
+            "$<TARGET_FILE_DIR:${target}>/Product.txt")
 endfunction()
 
 # ---------------------------------------------------------------------------
-# Main application
+# Main Qt application
 # ---------------------------------------------------------------------------
 qt_add_executable(BarcodeReader
     app/main.cpp
@@ -88,6 +111,7 @@ target_link_libraries(BarcodeReader PRIVATE
     ProductModule
     OrderModule
     OrderProductAdapter
+    BillingModule
 )
 copy_product_data(BarcodeReader)
 
@@ -110,3 +134,9 @@ target_link_libraries(OrderIntegrationTest PRIVATE OrderProductAdapter)
 copy_product_data(OrderIntegrationTest)
 add_test(NAME OrderIntegrationTest COMMAND OrderIntegrationTest
          WORKING_DIRECTORY $<TARGET_FILE_DIR:OrderIntegrationTest>)
+
+add_executable(BillingTest tests/BillingTest.cpp)
+target_link_libraries(BillingTest PRIVATE BillingModule OrderProductAdapter)
+copy_product_data(BillingTest)
+add_test(NAME BillingTest COMMAND BillingTest
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:BillingTest>)

@@ -8,6 +8,7 @@ add_executable(ProductTest
     ../src/test_products.cpp
     ../src/Product.cpp
     ../src/ProductFileHandler.cpp
+    ../src/ProductManager.cpp
 )
 
 add_custom_command(TARGET ProductTest POST_BUILD
