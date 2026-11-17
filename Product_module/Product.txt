@@ -1,0 +1,5 @@
+1 123456 RICE5KG Basmati Rice 5kg count 1850 120 50 40 barcodes/123456.png #
+2 234567 MILK1L Olpers Milk count 310 15 10 100 barcodes/234567.png #
+3 345678 SUGAR Loose Sugar weight 180 0 5 25.5 barcodes/345678.png #
+4 456789 TEA950 Tapal Danedar 950g count 1450 95 45 60 barcodes/456789.png #
+5 567890 FLOUR10 Fine Chakki Atta weight 140 0 0 80.0 barcodes/567890.png #
