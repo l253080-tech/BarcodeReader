@@ -206,8 +206,9 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     paymentMode_ = new QComboBox(paymentCard);
     paymentMode_->addItems({"Cash", "Card", "Wallet"});
     paymentMode_->setMinimumHeight(38);
-    merchantName_ = new QLineEdit(paymentCard);
-    merchantName_->setPlaceholderText("Required for card or wallet");
+    merchantName_ = new QComboBox(paymentCard);
+    merchantName_->setMinimumHeight(38);
+    merchantName_->addItem("Not required");
     paymentButton_ = new QPushButton("Complete payment", paymentCard);
     paymentButton_->setObjectName("primaryButton");
     paymentForm->addRow("Amount received", paymentInput_);
@@ -242,13 +243,39 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     });
     connect(updateButton, &QPushButton::clicked, this, [this] {
         const int row = cartTable_->currentRow();
-        if (row < 0) { setStatus("Select a product row first.", true); return; }
-        auto product = products_.findById(cartTable_->item(row, 0)->text().toInt());
+        if (row < 0 || !cartTable_->item(row, 0)) { setStatus("Select a product row first.", true); return; }
+        const auto product = products_.findById(cartTable_->item(row, 0)->text().toInt());
         if (!product) { setStatus("Product is no longer available.", true); return; }
-        const double quantity = quantityInput_->value();
+
+        // Ask for the NEW total quantity (lower = reduce, higher = increase)
+        const bool weighted = product->getUnit() == "weight";
+        const double currentQty = cartTable_->item(row, 3)->text().toDouble();
+        const QString prompt = QString("New quantity for %1\n(currently %2, available stock %3):")
+                                   .arg(QString::fromStdString(product->getName()))
+                                   .arg(currentQty, 0, 'f', weighted ? 1 : 0)
+                                   .arg(product->getQuantity(), 0, 'f', weighted ? 1 : 0);
+        bool ok = false;
+        double quantity = 0.0;
+        if (weighted) {
+            quantity = QInputDialog::getDouble(this, "Update quantity", prompt, currentQty,
+                                               0.1, std::max(0.1, product->getQuantity()), 1, &ok);
+        } else {
+            const int maxQty = std::max(1, static_cast<int>(std::floor(product->getQuantity())));
+            quantity = QInputDialog::getInt(this, "Update quantity", prompt,
+                                            static_cast<int>(std::lround(currentQty)), 1, maxQty, 1, &ok);
+        }
+        if (!ok) return;   // cancelled
+
         const auto result = orders_.updateProductQuantity(product->getBarcode(), quantity);
-        setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
+        if (result == OrderResult::Success)
+            setStatus(QString("Quantity updated to %1.").arg(quantity, 0, 'f', weighted ? 1 : 0));
+        else
+            setStatus(QString::fromLocal8Bit(describe(result)), true);
         refreshCart();
+    });
+    // Double-clicking a row does the same as the Update quantity button
+    connect(cartTable_, &QTableWidget::cellDoubleClicked, this, [updateButton](int, int) {
+        updateButton->click();
     });
     connect(clearButton, &QPushButton::clicked, this, [this] {
         if (QMessageBox::question(this, "Clear order", "Discard the current order?") != QMessageBox::Yes)
@@ -263,11 +290,43 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
         customerContact_->clear();
         setStatus("Current order cleared.");
     });
-    connect(paymentMode_, &QComboBox::currentTextChanged, this, [this](const QString &selected) {
-        merchantName_->setEnabled(selected != "Cash");
-        if (selected == "Cash") merchantName_->clear();
-    });
-    merchantName_->setEnabled(false);
+    auto updateMerchantOptions = [this](const QString &selected) {
+        merchantName_->clear();
+
+        if (selected == "Cash") {
+            merchantName_->addItem("Not required");
+            merchantName_->setEnabled(false);
+        }
+        else if (selected == "Card") {
+            merchantName_->addItem("Select bank");
+            merchantName_->addItems({
+                "HBL",
+                "UBL",
+                "Meezan Bank",
+                "Allied Bank",
+                "Bank Alfalah",
+                "Other"
+            });
+            merchantName_->setEnabled(true);
+        }
+        else if (selected == "Wallet") {
+            merchantName_->addItem("Select wallet");
+            merchantName_->addItems({
+                "JazzCash",
+                "Easypaisa",
+                "Other"
+            });
+            merchantName_->setEnabled(true);
+        }
+
+        merchantName_->setCurrentIndex(0);
+    };
+
+    connect(paymentMode_, &QComboBox::currentTextChanged,
+            this, updateMerchantOptions);
+
+    // Set the initial merchant options for the default payment mode.
+    updateMerchantOptions(paymentMode_->currentText());
     refreshCart();
 }
 
@@ -460,12 +519,17 @@ void PosTab::completePayment()
     PaymentMode paymentMode = PaymentMode::Cash;
     if (paymentMode_->currentText() == "Card") paymentMode = PaymentMode::Card;
     else if (paymentMode_->currentText() == "Wallet") paymentMode = PaymentMode::Wallet;
-    if (paymentMode != PaymentMode::Cash && merchantName_->text().trimmed().isEmpty()) {
-        setStatus("Enter the card or wallet merchant name.", true);
+    if (paymentMode != PaymentMode::Cash && merchantName_->currentIndex() == 0) {
+        setStatus("Please select a bank or wallet provider.", true);
         return;
     }
+
+    const QString merchant = (paymentMode == PaymentMode::Cash)
+                                 ? QString()
+                                 : merchantName_->currentText();
+
     const Order orderSnapshot = *order;
-    billing_.setPaymentDetails(paymentInput_->value(), paymentMode, merchantName_->text().toStdString());
+    billing_.setPaymentDetails(paymentInput_->value(), paymentMode, merchant.toStdString());
     std::optional<Bill> bill;
     const BillingResult result = billing_.finalizeBill(bill);
     if (result != BillingResult::Success || !bill) {
@@ -486,12 +550,12 @@ void PosTab::completePayment()
         return;
     }
     Order shownOrder = orderSnapshot;
-    shownOrder.setPayment(paymentInput_->value(), paymentMode, merchantName_->text().toStdString());
+    shownOrder.setPayment(paymentInput_->value(), paymentMode, merchant.toStdString());
     BillDialog dialog(*bill, shownOrder, products_, this);
     dialog.exec();
     products_.loadProducts();
     paymentInput_->setValue(0.0);
-    merchantName_->clear();
+    merchantName_->setCurrentIndex(0);
     paymentMode_->setCurrentIndex(0);
     quantityInput_->setRange(1.0, 1000000.0);
     quantityInput_->setDecimals(0);
