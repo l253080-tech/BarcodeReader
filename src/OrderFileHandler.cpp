@@ -152,7 +152,9 @@ bool OrderFileHandler::writeLinesAtomic(const string& targetPath, const vector<s
             out << l << "\n";
         }
         out.flush();
-        if (!out.good()) {
+        const bool flushed = out.good();
+        out.close();
+        if (!flushed || out.fail()) {
             return false;
         }
     }
@@ -226,9 +228,12 @@ vector<Order> OrderFileHandler::loadOrders() const {
     while (getline(in, line)) {
         Order o;
         if (parseOrderLine(line, o)) {
+            const OrderStatus savedStatus = o.getOrderStatus();
+            o.setOrderStatus(OrderStatus::InProgress);
             for (const auto& item : loadOrderDetails(o.getOrderId())) {
                 o.addItem(item);
             }
+            o.setOrderStatus(savedStatus);
             orders.push_back(move(o));
         }
     }
@@ -263,9 +268,12 @@ optional<Order> OrderFileHandler::findOrderById(const string& orderId) const {
     while (getline(in, line)) {
         Order o;
         if (parseOrderLine(line, o) && o.getOrderId() == orderId) {
+            const OrderStatus savedStatus = o.getOrderStatus();
+            o.setOrderStatus(OrderStatus::InProgress);
             for (const auto& item : loadOrderDetails(orderId)) {
                 o.addItem(item);
             }
+            o.setOrderStatus(savedStatus);
             return o;
         }
     }

@@ -18,6 +18,7 @@ public:
     bool checkStock(const std::string& barcode, double quantity) const;
     bool updateStock(const std::string& barcode, double change);
     std::string getProductDescription(const std::string& barcode) const;
+    const std::string& getProductFilePath() const { return handler.filePath(); }
 
 private:
     ProductFileHandler handler;

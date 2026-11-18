@@ -1,0 +1,3 @@
+if(NOT EXISTS "${PRODUCT_DEST}")
+    file(COPY_FILE "${PRODUCT_SOURCE}" "${PRODUCT_DEST}")
+endif()

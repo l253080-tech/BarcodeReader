@@ -177,6 +177,7 @@ bool BillingManager::updatePaymentStatus(Bill& bill, const string& status) const
 BillingResult BillingManager::finalizeBill(optional<Bill>& outBill) {
     outBill.reset();
     changeReturned_ = 0.0;
+    lastPersistenceErrorPath_.clear();
 
     const Order* current = orderManager_.getCurrentOrder();
     if (!current) {
@@ -218,28 +219,38 @@ BillingResult BillingManager::finalizeBill(optional<Bill>& outBill) {
     Order completedOrder = move(*completedOrderOpt);
 
     if (!orderFileHandler_.saveOrder(completedOrder)) {
+        lastPersistenceErrorPath_ = orderFileHandler_.orderFilePath();
         return BillingResult::PersistenceFailed;
     }
 
     if (!orderFileHandler_.saveOrderDetails(completedOrder)) {
-        orderFileHandler_.removeOrderRecord(completedOrder.getOrderId());
+        lastPersistenceErrorPath_ = orderFileHandler_.orderDetailFilePath();
+        if (!orderFileHandler_.removeOrderRecord(completedOrder.getOrderId()))
+            lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderFilePath();
         return BillingResult::PersistenceFailed;
     }
 
     if (!billFileHandler_.saveBill(bill)) {
-        orderFileHandler_.removeOrderDetails(completedOrder.getOrderId());
-        orderFileHandler_.removeOrderRecord(completedOrder.getOrderId());
+        lastPersistenceErrorPath_ = billFileHandler_.billFilePath();
+        if (!orderFileHandler_.removeOrderDetails(completedOrder.getOrderId()))
+            lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderDetailFilePath();
+        if (!orderFileHandler_.removeOrderRecord(completedOrder.getOrderId()))
+            lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderFilePath();
         return BillingResult::PersistenceFailed;
     }
 
     vector<pair<string, double>> deducted;
     for (const auto& item : completedOrder.getItems()) {
         if (!productManager_.updateStock(item.getBarcode(), -item.getQuantity())) {
+            lastPersistenceErrorPath_ = productManager_.getProductFilePath();
             for (const auto& prev : deducted) {
-                productManager_.updateStock(prev.first, prev.second);
+                if (!productManager_.updateStock(prev.first, prev.second))
+                    lastPersistenceErrorPath_ += "\nInventory rollback also failed: " + productManager_.getProductFilePath();
             }
-            orderFileHandler_.removeOrderDetails(completedOrder.getOrderId());
-            orderFileHandler_.removeOrderRecord(completedOrder.getOrderId());
+            if (!orderFileHandler_.removeOrderDetails(completedOrder.getOrderId()))
+                lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderDetailFilePath();
+            if (!orderFileHandler_.removeOrderRecord(completedOrder.getOrderId()))
+                lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderFilePath();
             return BillingResult::InventoryUpdateFailed;
         }
         deducted.emplace_back(item.getBarcode(), item.getQuantity());

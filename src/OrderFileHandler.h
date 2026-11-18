@@ -23,6 +23,8 @@ public:
 
     bool removeOrderRecord(const string& orderId) const;
     bool removeOrderDetails(const string& orderId) const;
+    const string& orderFilePath() const { return orderFilePath_; }
+    const string& orderDetailFilePath() const { return orderDetailFilePath_; }
 
 private:
     static string encodeToken(const string& raw);
