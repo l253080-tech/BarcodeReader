@@ -33,8 +33,15 @@ BillingManager::BillingManager(ProductManager& productManager,
     for (const auto& existingBill : billFileHandler_.loadBills()) {
         registerExistingBillId(existingBill.getBillId());
     }
+    restoreSavedOrders();
+}
+
+void BillingManager::restoreSavedOrders() {
     for (const auto& existingOrder : orderFileHandler_.loadOrders()) {
         orderManager_.registerExistingOrderId(existingOrder.getOrderId());
+        if (existingOrder.getOrderStatus() == OrderStatus::OnHold) {
+            orderManager_.restoreHeldOrder(existingOrder);
+        }
     }
 }
 
@@ -108,7 +115,7 @@ double BillingManager::calculateTotalPayable(const Order& order) const {
     return payable;
 }
 
-optional<Bill> BillingManager::generateBill(const Order& order) {
+optional<Bill> BillingManager::buildBill(const Order& order, const string& billId) const {
     if (order.getItems().empty()) {
         return nullopt;
     }
@@ -133,12 +140,25 @@ optional<Bill> BillingManager::generateBill(const Order& order) {
         billItems.push_back(move(bi));
     }
 
-    string status = "unpaid";
-    if (order.getOrderStatus() == OrderStatus::Paid) {
-        status = "paid";
+    // Spec: bill status is the order status (in-progress, on-hold, paid, archived)
+    return Bill(billId, order.getCustomerName(), order.getOrderId(), move(billItems),
+                toString(order.getOrderStatus()));
+}
+
+optional<Bill> BillingManager::generateBill(const Order& order) {
+    if (order.getItems().empty()) {
+        return nullopt;
     }
-    Bill bill(generateBillId(), order.getCustomerName(), order.getOrderId(), move(billItems), status);
+    string id = generateBillId();
+    auto bill = buildBill(order, id);
+    if (!bill) {
+        usedBillIds_.erase(id);   // do not burn an ID on a failed bill
+    }
     return bill;
+}
+
+optional<Bill> BillingManager::previewBill(const Order& order) const {
+    return buildBill(order, "");
 }
 
 void BillingManager::setPaymentDetails(double amount, PaymentMode mode, const string& merchant) {
@@ -204,57 +224,89 @@ BillingResult BillingManager::finalizeBill(optional<Bill>& outBill) {
         return BillingResult::InvalidPayment;
     }
 
-    auto billOpt = generateBill(*current);
+    const string billId = generateBillId();
+    auto billOpt = buildBill(*current, billId);
     if (!billOpt) {
+        usedBillIds_.erase(billId);
         return BillingResult::ProductNotFound;
     }
-
     Bill bill = move(*billOpt);
-    updatePaymentStatus(bill, "paid");
+    updatePaymentStatus(bill, toString(OrderStatus::Paid));
 
-    auto completedOrderOpt = orderManager_.completePayment(paymentAmount_, paymentMode_, merchantName_);
-    if (!completedOrderOpt) {
-        return BillingResult::OrderNotPlaced;
-    }
-    Order completedOrder = move(*completedOrderOpt);
+    // Work on a COPY. The real order stays in OrderManager until everything
+    // has been saved, so a failed save never loses the cashier's order.
+    Order completed = *current;
+    completed.setPayment(bill.getTotalPayable(), paymentMode_, merchantName_);
+    completed.setOrderStatus(OrderStatus::Paid);
+    const string orderId = completed.getOrderId();
 
-    if (!orderFileHandler_.saveOrder(completedOrder)) {
-        lastPersistenceErrorPath_ = orderFileHandler_.orderFilePath();
-        return BillingResult::PersistenceFailed;
-    }
+    // What was on disk before (e.g. an on-hold record), so rollback can restore it.
+    optional<Order> previous = orderFileHandler_.findOrderById(orderId);
 
-    if (!orderFileHandler_.saveOrderDetails(completedOrder)) {
-        lastPersistenceErrorPath_ = orderFileHandler_.orderDetailFilePath();
-        if (!orderFileHandler_.removeOrderRecord(completedOrder.getOrderId()))
-            lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderFilePath();
-        return BillingResult::PersistenceFailed;
-    }
-
-    if (!billFileHandler_.saveBill(bill)) {
-        lastPersistenceErrorPath_ = billFileHandler_.billFilePath();
-        if (!orderFileHandler_.removeOrderDetails(completedOrder.getOrderId()))
-            lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderDetailFilePath();
-        if (!orderFileHandler_.removeOrderRecord(completedOrder.getOrderId()))
-            lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderFilePath();
-        return BillingResult::PersistenceFailed;
-    }
-
-    vector<pair<string, double>> deducted;
-    for (const auto& item : completedOrder.getItems()) {
-        if (!productManager_.updateStock(item.getBarcode(), -item.getQuantity())) {
-            lastPersistenceErrorPath_ = productManager_.getProductFilePath();
-            for (const auto& prev : deducted) {
-                if (!productManager_.updateStock(prev.first, prev.second))
-                    lastPersistenceErrorPath_ += "\nInventory rollback also failed: " + productManager_.getProductFilePath();
-            }
-            if (!orderFileHandler_.removeOrderDetails(completedOrder.getOrderId()))
-                lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderDetailFilePath();
-            if (!orderFileHandler_.removeOrderRecord(completedOrder.getOrderId()))
+    auto fail = [&](BillingResult result, const string& path) {
+        lastPersistenceErrorPath_ = path;
+        usedBillIds_.erase(billId);
+        return result;
+    };
+    auto restoreOrderFiles = [&]() {
+        if (previous) {
+            if (!orderFileHandler_.saveOrder(*previous))
                 lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderFilePath();
-            return BillingResult::InventoryUpdateFailed;
+            const bool detailsOk = previous->getItems().empty()
+                ? orderFileHandler_.removeOrderDetails(orderId)
+                : orderFileHandler_.saveOrderDetails(*previous);
+            if (!detailsOk)
+                lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderDetailFilePath();
+        } else {
+            if (!orderFileHandler_.removeOrderDetails(orderId))
+                lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderDetailFilePath();
+            if (!orderFileHandler_.removeOrderRecord(orderId))
+                lastPersistenceErrorPath_ += "\nCleanup also failed: " + orderFileHandler_.orderFilePath();
+        }
+    };
+
+    // 1. Order.txt
+    if (!orderFileHandler_.saveOrder(completed)) {
+        BillingResult r = fail(BillingResult::PersistenceFailed, orderFileHandler_.orderFilePath());
+        restoreOrderFiles();
+        return r;
+    }
+
+    // 2. OrderDetail.txt
+    if (!orderFileHandler_.saveOrderDetails(completed)) {
+        BillingResult r = fail(BillingResult::PersistenceFailed, orderFileHandler_.orderDetailFilePath());
+        restoreOrderFiles();
+        return r;
+    }
+
+    // 3. Product.txt stock (rolled back if any item fails)
+    vector<pair<string, double>> deducted;
+    auto rollbackStock = [&]() {
+        for (const auto& prev : deducted) {
+            if (!productManager_.updateStock(prev.first, prev.second))
+                lastPersistenceErrorPath_ += "\nInventory rollback also failed: " + productManager_.getProductFilePath();
+        }
+    };
+    for (const auto& item : completed.getItems()) {
+        if (!productManager_.updateStock(item.getBarcode(), -item.getQuantity())) {
+            BillingResult r = fail(BillingResult::InventoryUpdateFailed, productManager_.getProductFilePath());
+            rollbackStock();
+            restoreOrderFiles();
+            return r;
         }
         deducted.emplace_back(item.getBarcode(), item.getQuantity());
     }
+
+    // 4. Bill.txt is written LAST, so a failure earlier never leaves a stray bill
+    if (!billFileHandler_.saveBill(bill)) {
+        BillingResult r = fail(BillingResult::PersistenceFailed, billFileHandler_.billFilePath());
+        rollbackStock();
+        restoreOrderFiles();
+        return r;
+    }
+
+    // Everything is on disk: only now release the order from OrderManager.
+    orderManager_.completePayment(bill.getTotalPayable(), paymentMode_, merchantName_);
 
     changeReturned_ = paymentAmount_ - bill.getTotalPayable();
     if (changeReturned_ < 0.0) {
@@ -266,5 +318,59 @@ BillingResult BillingManager::finalizeBill(optional<Bill>& outBill) {
     merchantName_.clear();
 
     outBill = move(bill);
+    return BillingResult::Success;
+}
+
+BillingResult BillingManager::holdCurrentOrder() {
+    lastPersistenceErrorPath_.clear();
+    const Order* current = orderManager_.getCurrentOrder();
+    if (!current) {
+        return BillingResult::NoActiveOrder;
+    }
+    const string id = current->getOrderId();
+
+    switch (orderManager_.holdOrder()) {
+        case OrderResult::Success:       break;
+        case OrderResult::NoActiveOrder: return BillingResult::NoActiveOrder;
+        case OrderResult::EmptyOrder:    return BillingResult::EmptyOrder;
+        default:                         return BillingResult::OrderNotEditable;
+    }
+
+    const Order& held = orderManager_.getHeldOrders().at(id);
+    if (!orderFileHandler_.saveOrder(held)) {
+        lastPersistenceErrorPath_ = orderFileHandler_.orderFilePath();
+        orderManager_.resumeOrder(id);          // put it back so nothing is lost
+        return BillingResult::PersistenceFailed;
+    }
+    if (!orderFileHandler_.saveOrderDetails(held)) {
+        lastPersistenceErrorPath_ = orderFileHandler_.orderDetailFilePath();
+        orderFileHandler_.removeOrderRecord(id);
+        orderManager_.resumeOrder(id);
+        return BillingResult::PersistenceFailed;
+    }
+    return BillingResult::Success;
+}
+
+OrderResult BillingManager::resumeHeldOrder(const string& orderId) {
+    return orderManager_.resumeOrder(orderId);
+}
+
+BillingResult BillingManager::cancelCurrentOrder() {
+    lastPersistenceErrorPath_.clear();
+    const Order* current = orderManager_.getCurrentOrder();
+    if (!current) {
+        return BillingResult::NoActiveOrder;
+    }
+    const string id = current->getOrderId();
+    orderManager_.cancelOrder();
+
+    // Remove any saved copy (a resumed held order still has an "on-hold" record)
+    const bool detailsOk = orderFileHandler_.removeOrderDetails(id);
+    const bool recordOk = orderFileHandler_.removeOrderRecord(id);
+    if (!detailsOk || !recordOk) {
+        lastPersistenceErrorPath_ = !recordOk ? orderFileHandler_.orderFilePath()
+                                              : orderFileHandler_.orderDetailFilePath();
+        return BillingResult::PersistenceFailed;
+    }
     return BillingResult::Success;
 }

@@ -58,7 +58,7 @@ MainWindow::MainWindow(QWidget *parent)
     while (std::getline(productInput, productLine))
         if (productLine.find_first_not_of(" \t\r\n") != std::string::npos) ++nonEmptyLines;
     const bool productsLoaded = productFileOpened && nonEmptyLines > 0
-        && nonEmptyLines == productManager_->getAllProducts().size();
+                                && nonEmptyLines == productManager_->getAllProducts().size();
     productCatalog_ = std::make_unique<ProductManagerCatalog>(*productManager_);
     orderManager_ = std::make_unique<OrderManager>(*productCatalog_);
     orderFileHandler_ = std::make_unique<OrderFileHandler>(
@@ -67,9 +67,6 @@ MainWindow::MainWindow(QWidget *parent)
     billFileHandler_ = std::make_unique<BillFileHandler>(dataDir.filePath("Bill.txt").toStdString());
     billingManager_ = std::make_unique<BillingManager>(
         *productManager_, *orderManager_, *orderFileHandler_, *billFileHandler_);
-    for (const Order &order : orderFileHandler_->loadOrders())
-        if (order.getOrderStatus() == OrderStatus::OnHold)
-            orderManager_->restoreHeldOrder(order);
 
     auto *shell = new QWidget(this);
     auto *shellLayout = new QHBoxLayout(shell);
@@ -105,7 +102,7 @@ MainWindow::MainWindow(QWidget *parent)
     auto *topTitle = new QLabel("Store operations", topbar);
     topTitle->setObjectName("topTitle");
     const bool storageReady = productsLoaded && transactionFilesReady;
-    auto *storeStatus = new QLabel(storageReady ? "●  Inventory loaded" : "●  Inventory / data file issue", topbar);
+    auto *storeStatus = new QLabel(storageReady ? QString("●  Inventory loaded  ·  data: ") + QFileInfo(dataDirectory).absoluteFilePath() : QString("●  Inventory / data file issue"), topbar);
     storeStatus->setObjectName(storageReady ? "storeStatus" : "storeStatusError");
     storeStatus->setToolTip(QFileInfo(dataDirectory).absoluteFilePath());
     topLayout->addWidget(topTitle);
@@ -199,12 +196,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     if (!productsLoaded) {
         const QString reason = productFileOpened
-            ? "Product.txt is empty or contains malformed product records."
-            : "Product.txt could not be opened.";
+                                   ? "Product.txt is empty or contains malformed product records."
+                                   : "Product.txt could not be opened.";
         QMessageBox::warning(this, "Inventory unavailable", reason + "\nFile:\n" + QFileInfo(dataPath).absoluteFilePath());
     } else if (!transactionFilesReady) {
         QMessageBox::warning(this, "Data files unavailable",
-            "Could not create or open these data files:\n" + failedStartupPaths.join("\n"));
+                             "Could not create or open these data files:\n" + failedStartupPaths.join("\n"));
     }
 }
 

@@ -10,7 +10,7 @@ using namespace std;
 
 OrderFileHandler::OrderFileHandler(string orderFilePath, string orderDetailFilePath)
     : orderFilePath_(move(orderFilePath)),
-      orderDetailFilePath_(move(orderDetailFilePath)) {
+    orderDetailFilePath_(move(orderDetailFilePath)) {
 }
 
 string OrderFileHandler::encodeToken(const string& raw) {

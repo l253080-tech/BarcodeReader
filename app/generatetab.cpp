@@ -1,4 +1,3 @@
-
 #include "generatetab.h"
 #include "Barcode_Encoder.h"
 
@@ -170,10 +169,13 @@ GenerateTab::GenerateTab(QWidget *parent)
         const QString barcodeDirectory = QDir(QCoreApplication::applicationDirPath()).filePath("barcodes");
         QDir().mkpath(barcodeDirectory);
 
+        // Suggest the generated barcode number as the file name (e.g. 123456.png)
+        const QString suggestedName = barcodeNumber->text() + ".png";
+
         QString path = QFileDialog::getSaveFileName(
             this,
             "Save Barcode",
-            QDir(barcodeDirectory).filePath("barcode.png"),
+            QDir(barcodeDirectory).filePath(suggestedName),
             "PNG Image (*.png)"
             );
 
