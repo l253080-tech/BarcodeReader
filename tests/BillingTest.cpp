@@ -92,6 +92,41 @@ int main() {
     assert(updatedRice.has_value() && updatedRice->getQuantity() == 38.0);
     assert(updatedSugar.has_value() && updatedSugar->getQuantity() == 24.0);
 
+    // Order.txt stores the payable amount (not the cash handed over)
+    assert(savedOrders[0].getPaymentAmount() == 4102.5);
+    assert(generatedBill->getPaymentStatus() == "paid");
+
+    // 6. Hold -> saved on disk -> "restart" restores it
+    assert(orderManager.createOrder("Sara Ahmed") == OrderResult::Success);
+    assert(orderManager.addProductToOrder("234567", 3.0) == OrderResult::Success);
+    assert(billingManager.holdCurrentOrder() == BillingResult::Success);
+    assert(orderManager.getHeldOrders().size() == 1);
+
+    {
+        OrderManager orderManager2(catalog);
+        BillingManager billing2(productManager, orderManager2, orderFiles, billFiles);
+        assert(orderManager2.getHeldOrders().size() == 1);      // restored from Order.txt
+        string heldId = orderManager2.getHeldOrders().begin()->first;
+        assert(orderManager2.resumeOrder(heldId) == OrderResult::Success);
+        assert(orderManager2.getCurrentOrder()->getItems().size() == 1);
+
+        // 7. Cancelling the resumed order removes its on-hold record
+        assert(billing2.cancelCurrentOrder() == BillingResult::Success);
+    }
+    {
+        OrderManager orderManager3(catalog);
+        BillingManager billing3(productManager, orderManager3, orderFiles, billFiles);
+        assert(orderManager3.getHeldOrders().empty());          // does not come back
+        assert(orderFiles.loadOrders().size() == 1);            // only the paid order remains
+    }
+
+    // 8. Preview does not consume bill IDs
+    assert(orderManager.createOrder("Preview Test") == OrderResult::Success);
+    assert(orderManager.addProductToOrder("234567", 1.0) == OrderResult::Success);
+    auto preview = billingManager.previewBill(*orderManager.getCurrentOrder());
+    assert(preview.has_value() && preview->getBillId().empty());
+    assert(billingManager.cancelCurrentOrder() == BillingResult::Success);
+
     filesystem::remove("Test_Products.txt");
     filesystem::remove("Test_Order.txt");
     filesystem::remove("Test_OrderDetail.txt");

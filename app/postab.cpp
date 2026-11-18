@@ -55,7 +55,7 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
                BillingManager &billing, OrderFileHandler &orderFiles,
                const QString &dataDirectory, QWidget *parent)
     : QWidget(parent), products_(products), orders_(orders), billing_(billing),
-      orderFiles_(orderFiles), dataDirectory_(dataDirectory)
+    orderFiles_(orderFiles), dataDirectory_(dataDirectory)
 {
     auto *outerLayout = new QVBoxLayout(this);
     outerLayout->setContentsMargins(0, 0, 0, 0);
@@ -259,19 +259,10 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     connect(clearButton, &QPushButton::clicked, this, [this] {
         if (QMessageBox::question(this, "Clear order", "Discard the current order?") != QMessageBox::Yes)
             return;
-        const Order *current = orders_.getCurrentOrder();
-        const QString orderId = current ? QString::fromStdString(current->getOrderId()) : QString();
-        const auto result = orders_.cancelOrder();
-        if (result != OrderResult::Success && result != OrderResult::NoActiveOrder) {
-            setStatus(QString::fromLocal8Bit(describe(result)), true); return;
-        }
-        if (!orderId.isEmpty()) {
-            if (!orderFiles_.removeOrderDetails(orderId.toStdString()))
-                QMessageBox::warning(this, "Could not clear order", "Could not write file:\n"
-                    + QString::fromStdString(orderFiles_.orderDetailFilePath()));
-            if (!orderFiles_.removeOrderRecord(orderId.toStdString()))
-                QMessageBox::warning(this, "Could not clear order", "Could not write file:\n"
-                    + QString::fromStdString(orderFiles_.orderFilePath()));
+        const BillingResult result = billing_.cancelCurrentOrder();
+        if (result == BillingResult::PersistenceFailed) {
+            QMessageBox::warning(this, "Could not clear order", "Could not write file:\n"
+                                                                    + QString::fromStdString(billing_.getLastPersistenceErrorPath()));
         }
         refreshCart();
         customerName_->clear();
@@ -306,11 +297,11 @@ void PosTab::lookupProduct()
         return;
     }
     productInfo_->setText(QString("%1  ·  %2  ·  PKR %3  ·  Stock %4 %5")
-        .arg(QString::fromStdString(product->getName()))
-        .arg(QString::fromStdString(product->getBarcode()))
-        .arg(product->getPrice(), 0, 'f', 2)
-        .arg(product->getQuantity(), 0, 'f', 2)
-        .arg(QString::fromStdString(product->getUnit())));
+                              .arg(QString::fromStdString(product->getName()))
+                              .arg(QString::fromStdString(product->getBarcode()))
+                              .arg(product->getPrice(), 0, 'f', 2)
+                              .arg(product->getQuantity(), 0, 'f', 2)
+                              .arg(QString::fromStdString(product->getUnit())));
     const bool weighted = product->getUnit() == "weight";
     quantityInput_->setDecimals(weighted ? 1 : 0);
     quantityInput_->setSingleStep(weighted ? 0.1 : 1.0);
@@ -350,8 +341,8 @@ void PosTab::addToOrder()
         alreadyInOrder = current->getItemQuantity(product->getId());
     if (alreadyInOrder + quantity > product->getQuantity() + 1e-9) {
         setStatus(QString("Insufficient stock. Available: %1; already in cart: %2.")
-            .arg(product->getQuantity(), 0, 'f', weighted ? 1 : 0)
-            .arg(alreadyInOrder, 0, 'f', weighted ? 1 : 0), true);
+                      .arg(product->getQuantity(), 0, 'f', weighted ? 1 : 0)
+                      .arg(alreadyInOrder, 0, 'f', weighted ? 1 : 0), true);
         return;
     }
     if (!orders_.getCurrentOrder()) {
@@ -419,12 +410,9 @@ void PosTab::placeOrder()
         setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
         if (result == OrderResult::Success) {
             const Order *placed = orders_.getCurrentOrder();
-            if (placed) persistOrder(*placed);
-            refreshCart();
-            paymentInput_->setFocus();
-            paymentInput_->selectAll();
-            setStatus("Order placed. Review the amount and complete payment.");
-            return;
+            if (placed && persistOrder(*placed))
+                setStatus(QString("Order placed and saved to: %1")
+                              .arg(QString::fromStdString(orderFiles_.orderFilePath())));
         }
         refreshCart();
     }
@@ -432,13 +420,15 @@ void PosTab::placeOrder()
 
 void PosTab::holdOrder()
 {
-    const Order *active = orders_.getCurrentOrder();
-    const QString orderId = active ? QString::fromStdString(active->getOrderId()) : QString();
-    const auto result = orders_.holdOrder();
-    setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
-    if (result == OrderResult::Success) {
-        const auto held = orders_.getHeldOrders().find(orderId.toStdString());
-        if (held != orders_.getHeldOrders().end()) persistOrder(held->second);
+    const BillingResult result = billing_.holdCurrentOrder();
+    if (result == BillingResult::Success) {
+        setStatus(QString("Order put on hold and saved to: %1")
+                      .arg(QString::fromStdString(orderFiles_.orderFilePath())));
+    } else {
+        QString message = QString::fromLocal8Bit(describe(result));
+        const QString path = QString::fromStdString(billing_.getLastPersistenceErrorPath());
+        if (!path.isEmpty()) message += "\nCould not write file:\n" + path;
+        setStatus(message, true);
     }
     refreshCart();
 }
@@ -451,13 +441,12 @@ void PosTab::resumeOrder()
     bool ok = false;
     const QString selected = QInputDialog::getItem(this, "Resume order", "Held order", ids, 0, false, &ok);
     if (!ok) return;
-    const auto result = orders_.resumeOrder(selected.toStdString());
+    const auto result = billing_.resumeHeldOrder(selected.toStdString());
     if (result == OrderResult::Success) {
         const Order *order = orders_.getCurrentOrder();
         if (order) {
             customerName_->setText(QString::fromStdString(order->getCustomerName()));
             customerContact_->setText(QString::fromStdString(order->getCustomerContact()));
-            persistOrder(*order);
         }
     }
     setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
@@ -489,20 +478,22 @@ void PosTab::completePayment()
         const QString path = QString::fromStdString(billing_.getLastPersistenceErrorPath());
         if (!path.isEmpty()) {
             QMessageBox::warning(this, "Persistence failed", QString::fromLocal8Bit(describe(result))
-                + "\nCould not write file:\n" + path);
+                                 + "\nCould not write file:\n" + path);
             setStatus(QString::fromLocal8Bit(describe(result)) + " See the file path in the warning.");
             return;
         }
         if (result == BillingResult::InventoryUpdateFailed) {
             QMessageBox::warning(this, "Inventory update failed", QString::fromLocal8Bit(describe(result))
-                + "\nCould not write file:\n" + QString::fromStdString(products_.getProductFilePath()));
+                                 + "\nCould not write file:\n" + QString::fromStdString(products_.getProductFilePath()));
             setStatus(QString::fromLocal8Bit(describe(result)) + " See the file path in the warning.");
             return;
         }
         setStatus(QString::fromLocal8Bit(describe(result)), true);
         return;
     }
-    BillDialog dialog(*bill, orderSnapshot, products_, this);
+    Order shownOrder = orderSnapshot;
+    shownOrder.setPayment(paymentInput_->value(), paymentMode, merchantName_->text().toStdString());
+    BillDialog dialog(*bill, shownOrder, products_, this);
     dialog.exec();
     products_.loadProducts();
     paymentInput_->setValue(0.0);
@@ -535,12 +526,12 @@ bool PosTab::persistOrder(const Order &order)
 {
     if (!orderFiles_.saveOrder(order)) {
         QMessageBox::warning(this, "Order save failed", "Could not write file:\n"
-            + QString::fromStdString(orderFiles_.orderFilePath()));
+                                                            + QString::fromStdString(orderFiles_.orderFilePath()));
         return false;
     }
     if (!orderFiles_.saveOrderDetails(order)) {
         QMessageBox::warning(this, "Order items save failed", "Could not write file:\n"
-            + QString::fromStdString(orderFiles_.orderDetailFilePath()));
+                                                                  + QString::fromStdString(orderFiles_.orderDetailFilePath()));
         return false;
     }
     return true;

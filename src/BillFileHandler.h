@@ -4,25 +4,24 @@
 #include <vector>
 #include "Bill.h"
 
-using namespace std;
 
 class BillFileHandler {
 public:
-    explicit BillFileHandler(string billFilePath = "Bill.txt");
+    explicit BillFileHandler(std::string billFilePath = "Bill.txt");
 
     bool saveBill(const Bill& bill) const;
-    vector<Bill> loadBills() const;
-    optional<Bill> findBillById(const string& billId) const;
+    std::vector<Bill> loadBills() const;
+    std::optional<Bill> findBillById(const std::string& billId) const;
     bool validateBillRecord(const Bill& bill) const;
-    const string& billFilePath() const { return billFilePath_; }
+    const std::string& billFilePath() const { return billFilePath_; }
 
 private:
-    static string encodeToken(const string& raw);
-    static string decodeToken(const string& token);
+    static std::string encodeToken(const std::string& raw);
+    static std::string decodeToken(const std::string& token);
 
-    string formatBillLine(const Bill& bill) const;
-    bool parseBillLine(const string& rawLine, Bill& out) const;
-    bool writeLinesAtomic(const string& targetPath, const vector<string>& lines) const;
+    std::string formatBillLine(const Bill& bill) const;
+    bool parseBillLine(const std::string& rawLine, Bill& out) const;
+    bool writeLinesAtomic(const std::string& targetPath, const std::vector<std::string>& lines) const;
 
-    string billFilePath_;
+    std::string billFilePath_;
 };
