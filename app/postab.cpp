@@ -17,6 +17,8 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
@@ -100,13 +102,11 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     barcodeInput_ = new QLineEdit(productCard);
     barcodeInput_->setPlaceholderText("Scan or enter a 6-digit barcode");
     barcodeInput_->setMaxLength(6);
-    auto *lookupButton = new QPushButton("Find product", productCard);
+    barcodeInput_->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{0,6}"), barcodeInput_));
     auto *scanButton = new QPushButton("Start camera scan", productCard);
-    lookupButton->setMinimumHeight(40);
     scanButton->setMinimumHeight(40);
     scanButton->setObjectName("secondaryButton");
     scanRow->addWidget(barcodeInput_, 1);
-    scanRow->addWidget(lookupButton);
     scanRow->addWidget(scanButton);
     productLayout->addLayout(scanRow);
 
@@ -221,8 +221,14 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     statusLabel_->setObjectName("mutedText");
     root->addWidget(statusLabel_);
 
-    connect(lookupButton, &QPushButton::clicked, this, &PosTab::lookupProduct);
-    connect(barcodeInput_, &QLineEdit::returnPressed, this, &PosTab::lookupProduct);
+    connect(barcodeInput_, &QLineEdit::textChanged, this, [this](const QString &value) {
+        if (value.size() == 6) {
+            lookupProduct();
+        } else {
+            addButton_->setEnabled(false);
+            productInfo_->setText("Enter a barcode or scan a product to see its details.");
+        }
+    });
     connect(descriptionButton, &QPushButton::clicked, this, &PosTab::showProductDescription);
     connect(addButton_, &QPushButton::clicked, this, &PosTab::addToOrder);
     connect(scanButton, &QPushButton::clicked, this, [this] { emit cameraScanRequested(); });
@@ -282,8 +288,10 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
 
 void PosTab::acceptBarcode(const QString &barcode)
 {
-    barcodeInput_->setText(barcode);
-    lookupProduct();
+    if (barcodeInput_->text() == barcode)
+        lookupProduct();
+    else
+        barcodeInput_->setText(barcode);
     setStatus("Barcode scanned. Product lookup is ready.");
 }
 
@@ -407,13 +415,16 @@ void PosTab::placeOrder()
 {
     const Order *order = orders_.getCurrentOrder();
     if (order && order->isEditable()) {
-        if (QMessageBox::question(this, "Place order", "Lock this order and continue to payment?") != QMessageBox::Yes)
-            return;
         const auto result = orders_.placeOrder();
         setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
         if (result == OrderResult::Success) {
             const Order *placed = orders_.getCurrentOrder();
             if (placed) persistOrder(*placed);
+            refreshCart();
+            paymentInput_->setFocus();
+            paymentInput_->selectAll();
+            setStatus("Order placed. Review the amount and complete payment.");
+            return;
         }
         refreshCart();
     }
