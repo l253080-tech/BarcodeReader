@@ -8,7 +8,6 @@
 #include "productdetails.h"
 
 #include <QComboBox>
-#include <QCompleter>
 #include <QAbstractItemView>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -18,8 +17,6 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
-#include <QRegularExpression>
-#include <QRegularExpressionValidator>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
@@ -103,11 +100,13 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     barcodeInput_ = new QLineEdit(productCard);
     barcodeInput_->setPlaceholderText("Scan or enter a 6-digit barcode");
     barcodeInput_->setMaxLength(6);
-    barcodeInput_->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]{0,6}"), barcodeInput_));
+    auto *lookupButton = new QPushButton("Find product", productCard);
     auto *scanButton = new QPushButton("Start camera scan", productCard);
+    lookupButton->setMinimumHeight(40);
     scanButton->setMinimumHeight(40);
     scanButton->setObjectName("secondaryButton");
     scanRow->addWidget(barcodeInput_, 1);
+    scanRow->addWidget(lookupButton);
     scanRow->addWidget(scanButton);
     productLayout->addLayout(scanRow);
 
@@ -209,13 +208,6 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     paymentMode_->setMinimumHeight(38);
     merchantName_ = new QLineEdit(paymentCard);
     merchantName_->setPlaceholderText("Required for card or wallet");
-    {
-        auto *completer = new QCompleter(QStringList{"ABL", "HBL", "MCB", "UBL", "Meezan", "Bank Alfalah",
-                                                     "JazzCash", "Easypaisa", "SadaPay", "NayaPay"}, merchantName_);
-        completer->setCaseSensitivity(Qt::CaseInsensitive);
-        completer->setCompletionMode(QCompleter::PopupCompletion);
-        merchantName_->setCompleter(completer);
-    }
     paymentButton_ = new QPushButton("Complete payment", paymentCard);
     paymentButton_->setObjectName("primaryButton");
     paymentForm->addRow("Amount received", paymentInput_);
@@ -229,14 +221,8 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     statusLabel_->setObjectName("mutedText");
     root->addWidget(statusLabel_);
 
-    connect(barcodeInput_, &QLineEdit::textChanged, this, [this](const QString &value) {
-        if (value.size() == 6) {
-            lookupProduct();
-        } else {
-            addButton_->setEnabled(false);
-            productInfo_->setText("Enter a barcode or scan a product to see its details.");
-        }
-    });
+    connect(lookupButton, &QPushButton::clicked, this, &PosTab::lookupProduct);
+    connect(barcodeInput_, &QLineEdit::returnPressed, this, &PosTab::lookupProduct);
     connect(descriptionButton, &QPushButton::clicked, this, &PosTab::showProductDescription);
     connect(addButton_, &QPushButton::clicked, this, &PosTab::addToOrder);
     connect(scanButton, &QPushButton::clicked, this, [this] { emit cameraScanRequested(); });
@@ -256,39 +242,13 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     });
     connect(updateButton, &QPushButton::clicked, this, [this] {
         const int row = cartTable_->currentRow();
-        if (row < 0 || !cartTable_->item(row, 0)) { setStatus("Select a product row first.", true); return; }
-        const auto product = products_.findById(cartTable_->item(row, 0)->text().toInt());
+        if (row < 0) { setStatus("Select a product row first.", true); return; }
+        auto product = products_.findById(cartTable_->item(row, 0)->text().toInt());
         if (!product) { setStatus("Product is no longer available.", true); return; }
-
-        // Ask for the NEW total quantity (lower = reduce, higher = increase)
-        const bool weighted = product->getUnit() == "weight";
-        const double currentQty = cartTable_->item(row, 3)->text().toDouble();
-        const QString prompt = QString("New quantity for %1\n(currently %2, available stock %3):")
-                                   .arg(QString::fromStdString(product->getName()))
-                                   .arg(currentQty, 0, 'f', weighted ? 1 : 0)
-                                   .arg(product->getQuantity(), 0, 'f', weighted ? 1 : 0);
-        bool ok = false;
-        double quantity = 0.0;
-        if (weighted) {
-            quantity = QInputDialog::getDouble(this, "Update quantity", prompt, currentQty,
-                                               0.1, std::max(0.1, product->getQuantity()), 1, &ok);
-        } else {
-            const int maxQty = std::max(1, static_cast<int>(std::floor(product->getQuantity())));
-            quantity = QInputDialog::getInt(this, "Update quantity", prompt,
-                                            static_cast<int>(std::lround(currentQty)), 1, maxQty, 1, &ok);
-        }
-        if (!ok) return;   // cancelled
-
+        const double quantity = quantityInput_->value();
         const auto result = orders_.updateProductQuantity(product->getBarcode(), quantity);
-        if (result == OrderResult::Success)
-            setStatus(QString("Quantity updated to %1.").arg(quantity, 0, 'f', weighted ? 1 : 0));
-        else
-            setStatus(QString::fromLocal8Bit(describe(result)), true);
+        setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
         refreshCart();
-    });
-    // Double-clicking a row does the same as the Update quantity button
-    connect(cartTable_, &QTableWidget::cellDoubleClicked, this, [updateButton](int, int) {
-        updateButton->click();
     });
     connect(clearButton, &QPushButton::clicked, this, [this] {
         if (QMessageBox::question(this, "Clear order", "Discard the current order?") != QMessageBox::Yes)
@@ -304,20 +264,8 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
         setStatus("Current order cleared.");
     });
     connect(paymentMode_, &QComboBox::currentTextChanged, this, [this](const QString &selected) {
-        const bool cash = (selected == "Cash");
-        merchantName_->setEnabled(!cash);
-        if (cash) {
-            merchantName_->clear();
-            paymentInput_->setReadOnly(false);
-        } else {
-            // Card / wallet pay the exact amount due, so fill it in and lock it
-            if (const Order *current = orders_.getCurrentOrder())
-                paymentInput_->setValue(billing_.calculateTotalPayable(*current));
-            paymentInput_->setReadOnly(true);
-            merchantName_->setPlaceholderText(selected == "Card" ? "Bank name, e.g. HBL, ABL (required)"
-                                                                 : "Wallet name, e.g. JazzCash (required)");
-            merchantName_->setFocus();
-        }
+        merchantName_->setEnabled(selected != "Cash");
+        if (selected == "Cash") merchantName_->clear();
     });
     merchantName_->setEnabled(false);
     refreshCart();
@@ -325,10 +273,8 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
 
 void PosTab::acceptBarcode(const QString &barcode)
 {
-    if (barcodeInput_->text() == barcode)
-        lookupProduct();
-    else
-        barcodeInput_->setText(barcode);
+    barcodeInput_->setText(barcode);
+    lookupProduct();
     setStatus("Barcode scanned. Product lookup is ready.");
 }
 
@@ -452,6 +398,8 @@ void PosTab::placeOrder()
 {
     const Order *order = orders_.getCurrentOrder();
     if (order && order->isEditable()) {
+        if (QMessageBox::question(this, "Place order", "Lock this order and continue to payment?") != QMessageBox::Yes)
+            return;
         const auto result = orders_.placeOrder();
         setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
         if (result == OrderResult::Success) {
@@ -513,15 +461,11 @@ void PosTab::completePayment()
     if (paymentMode_->currentText() == "Card") paymentMode = PaymentMode::Card;
     else if (paymentMode_->currentText() == "Wallet") paymentMode = PaymentMode::Wallet;
     if (paymentMode != PaymentMode::Cash && merchantName_->text().trimmed().isEmpty()) {
-        setStatus(QString("Enter the %1 name (merchant) in the Merchant box, e.g. %2.")
-                      .arg(paymentMode == PaymentMode::Card ? "bank" : "wallet",
-                           paymentMode == PaymentMode::Card ? "HBL" : "JazzCash"), true);
-        merchantName_->setFocus();
+        setStatus("Enter the card or wallet merchant name.", true);
         return;
     }
-    const std::string merchant = merchantName_->text().trimmed().toStdString();
     const Order orderSnapshot = *order;
-    billing_.setPaymentDetails(paymentInput_->value(), paymentMode, merchant);
+    billing_.setPaymentDetails(paymentInput_->value(), paymentMode, merchantName_->text().toStdString());
     std::optional<Bill> bill;
     const BillingResult result = billing_.finalizeBill(bill);
     if (result != BillingResult::Success || !bill) {
@@ -542,14 +486,13 @@ void PosTab::completePayment()
         return;
     }
     Order shownOrder = orderSnapshot;
-    shownOrder.setPayment(paymentInput_->value(), paymentMode, merchant);
+    shownOrder.setPayment(paymentInput_->value(), paymentMode, merchantName_->text().toStdString());
     BillDialog dialog(*bill, shownOrder, products_, this);
     dialog.exec();
     products_.loadProducts();
     paymentInput_->setValue(0.0);
     merchantName_->clear();
     paymentMode_->setCurrentIndex(0);
-    paymentInput_->setReadOnly(false);
     quantityInput_->setRange(1.0, 1000000.0);
     quantityInput_->setDecimals(0);
     quantityInput_->setSingleStep(1.0);
