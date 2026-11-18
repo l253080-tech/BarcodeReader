@@ -1,26 +1,5 @@
-
 1 123456 RICE5KG Basmati Rice 5kg count 1850 120 50 40 barcodes/123456.png #
 2 234567 MILK1L Olpers Milk count 310 15 10 100 barcodes/234567.png #
 3 345678 SUGAR Loose Sugar weight 180 0 5 25.5 barcodes/345678.png #
 4 456789 TEA950 Tapal Danedar 950g count 1450 95 45 60 barcodes/456789.png #
 5 567890 FLOUR10 Fine Chakki Atta weight 140 0 0 80.0 barcodes/567890.png #
-6 678901 OIL1L Cooking Oil 1L count 580 35 20 75 barcodes/678901.png #
-7 789012 GHEE1KG Banaspati Ghee 1kg count 620 38 25 55 barcodes/789012.png #
-8 890123 SALT800 National Iodized Salt 800g count 95 5 0 90 barcodes/890123.png #
-9 901234 SPICE50 National Biryani Masala 50g count 120 8 5 65 barcodes/901234.png #
-10 112233 BISCUIT Peek Freans Sooper count 60 4 0 120 barcodes/112233.png #
-11 223344 JUICE1L Mango Juice 1L count 250 15 10 45 barcodes/223344.png #
-12 334455 WATER1L Mineral Water 1.5L count 110 6 0 100 barcodes/334455.png #
-13 445566 SOAP125 Lux Soap 125g count 145 9 5 80 barcodes/445566.png #
-14 556677 SHAMPOO Head and Shoulders 185ml count 520 32 25 35 barcodes/556677.png #
-15 667788 DETER1KG Ariel Washing Powder 1kg count 690 42 30 40 barcodes/667788.png #
-16 778899 TOOTHP Colgate Toothpaste 150g count 310 19 10 50 barcodes/778899.png #
-17 889900 EGGS12 Farm Eggs 12 pieces count 420 0 15 30 barcodes/889900.png #
-18 990011 YOGURT1KG Plain Yogurt weight 260 0 10 18.0 barcodes/990011.png #
-19 101122 CHICKEN Chicken Boneless weight 780 0 20 22.5 barcodes/101122.png #
-20 121233 APPLE Red Apples weight 350 0 15 35.0 barcodes/121233.png #
-21 131244 BANANA Fresh Bananas weight 180 0 5 28.0 barcodes/131244.png #
-22 141255 ONION Fresh Onions weight 120 0 0 50.0 barcodes/141255.png #
-23 151266 POTATO Fresh Potatoes weight 100 0 0 65.0 barcodes/151266.png #
-24 161277 DAL1KG Masoor Dal 1kg count 320 19 10 40 barcodes/161277.png #
-25 171288 COFFEE200 Instant Coffee 200g count 890 55 40 25 barcodes/171288.png #

@@ -51,7 +51,7 @@ private:
     QLineEdit *barcodeInput_ = nullptr;
     QLineEdit *customerName_ = nullptr;
     QLineEdit *customerContact_ = nullptr;
-    QComboBox *merchantName_ = nullptr;
+    QLineEdit *merchantName_ = nullptr;
     QDoubleSpinBox *quantityInput_ = nullptr;
     QDoubleSpinBox *paymentInput_ = nullptr;
     QComboBox *paymentMode_ = nullptr;
