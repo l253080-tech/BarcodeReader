@@ -54,7 +54,7 @@ BillDialog::BillDialog(const Bill &bill, const Order &order,
             name,
             QString("PKR %1").arg(item.unitPriceWithoutTax, 0, 'f', 2),
             QString("PKR %1").arg(item.discountPerUnit, 0, 'f', 2),
-            QString::number(item.quantity, 'f', 2),
+            QString::number(item.quantity, 'f', 0),
             QString("PKR %1").arg(item.getLineTax(), 0, 'f', 2),
             QString("PKR %1").arg(std::max(0.0, item.getLinePayable()), 0, 'f', 2)
         };
@@ -107,7 +107,7 @@ QString BillDialog::printableText() const
                     .arg(name.toHtmlEscaped())
                     .arg(item.unitPriceWithoutTax, 0, 'f', 2)
                     .arg(item.discountPerUnit, 0, 'f', 2)
-                    .arg(item.quantity, 0, 'f', 2)
+                    .arg(item.quantity, 0, 'f', 0)
                     .arg(item.getLineTax(), 0, 'f', 2)
                     .arg(std::max(0.0, item.getLinePayable()), 0, 'f', 2);
     }

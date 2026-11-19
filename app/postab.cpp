@@ -120,7 +120,7 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     quantityInput_ = new QDoubleSpinBox(productCard);
     quantityInput_->setRange(1.0, 1000000.0);
     quantityInput_->setValue(1.0);
-    quantityInput_->setDecimals(2);
+    quantityInput_->setDecimals(0);
     quantityInput_->setMinimumHeight(38);
     addButton_ = new QPushButton("Add to order", productCard);
     addButton_->setObjectName("primaryButton");
@@ -257,28 +257,22 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
         const Order *order = orders_.getCurrentOrder();
         if (!order) return;
 
-        // Ask for the NEW total quantity (lower = reduce, higher = increase)
-        const bool weighted = product->getUnit() == "weight";
+        // Ask for the NEW total quantity (lower = reduce, higher = increase), whole numbers only
         const double currentQty = order->getItemQuantity(product->getId());
+        const int maxQty = std::max(1, static_cast<int>(std::floor(product->getQuantity())));
         const QString prompt = QString("New quantity for %1\n(currently %2, available stock %3):")
                                    .arg(QString::fromStdString(product->getName()))
-                                   .arg(currentQty, 0, 'f', weighted ? 1 : 0)
-                                   .arg(product->getQuantity(), 0, 'f', weighted ? 1 : 0);
+                                   .arg(currentQty, 0, 'f', 0)
+                                   .arg(maxQty);
         bool ok = false;
-        double quantity = 0.0;
-        if (weighted) {
-            quantity = QInputDialog::getDouble(this, "Update quantity", prompt, currentQty,
-                                               0.1, std::max(0.1, product->getQuantity()), 1, &ok);
-        } else {
-            const int maxQty = std::max(1, static_cast<int>(std::floor(product->getQuantity())));
-            quantity = QInputDialog::getInt(this, "Update quantity", prompt,
-                                            static_cast<int>(std::lround(currentQty)), 1, maxQty, 1, &ok);
-        }
+        const int newQty = QInputDialog::getInt(this, "Update quantity", prompt,
+                                                static_cast<int>(std::lround(currentQty)), 1, maxQty, 1, &ok);
+        const double quantity = newQty;
         if (!ok) { refreshCart(); return; }   // cancelled
 
         const auto result = orders_.updateProductQuantity(product->getBarcode(), quantity);
         if (result == OrderResult::Success)
-            setStatus(QString("Quantity updated to %1.").arg(quantity, 0, 'f', weighted ? 1 : 0));
+            setStatus(QString("Quantity updated to %1.").arg(newQty));
         else
             setStatus(QString::fromLocal8Bit(describe(result)), true);
         refreshCart();
@@ -348,19 +342,14 @@ void PosTab::lookupProduct()
                               .arg(QString::fromStdString(product->getName()))
                               .arg(QString::fromStdString(product->getBarcode()))
                               .arg(product->getPrice(), 0, 'f', 2)
-                              .arg(product->getQuantity(), 0, 'f', 2)
+                              .arg(std::floor(product->getQuantity()), 0, 'f', 0)
                               .arg(QString::fromStdString(product->getUnit())));
-    const bool weighted = product->getUnit() == "weight";
-    quantityInput_->setDecimals(weighted ? 1 : 0);
-    quantityInput_->setSingleStep(weighted ? 0.1 : 1.0);
-    if (weighted) {
-        quantityInput_->setRange(0.1, std::max(0.1, product->getQuantity()));
-        quantityInput_->setValue(0.1);
-    } else {
-        const int available = static_cast<int>(std::floor(product->getQuantity()));
-        quantityInput_->setRange(1.0, std::max(1, available));
-        quantityInput_->setValue(1.0);
-    }
+    // Quantities are always whole numbers (1 more / 1 less), for count and weight products alike
+    const int available = static_cast<int>(std::floor(product->getQuantity()));
+    quantityInput_->setDecimals(0);
+    quantityInput_->setSingleStep(1.0);
+    quantityInput_->setRange(1.0, std::max(1, available));
+    quantityInput_->setValue(1.0);
     addButton_->setEnabled(true);
     setStatus("Product found.");
 }
@@ -379,9 +368,8 @@ void PosTab::addToOrder()
     if (!product) { lookupProduct(); return; }
     const double quantity = quantityInput_->value();
     if (!(quantity > 0.0)) { setStatus("Enter a quantity greater than zero.", true); return; }
-    const bool weighted = product->getUnit() == "weight";
-    if (!weighted && std::fabs(quantity - std::round(quantity)) > 1e-9) {
-        setStatus("Count products must use whole-number quantities.", true);
+    if (std::fabs(quantity - std::round(quantity)) > 1e-9) {
+        setStatus("Quantity must be a whole number.", true);
         return;
     }
     double alreadyInOrder = 0.0;
@@ -389,8 +377,8 @@ void PosTab::addToOrder()
         alreadyInOrder = current->getItemQuantity(product->getId());
     if (alreadyInOrder + quantity > product->getQuantity() + 1e-9) {
         setStatus(QString("Insufficient stock. Available: %1; already in cart: %2.")
-                      .arg(product->getQuantity(), 0, 'f', weighted ? 1 : 0)
-                      .arg(alreadyInOrder, 0, 'f', weighted ? 1 : 0), true);
+                      .arg(std::floor(product->getQuantity()), 0, 'f', 0)
+                      .arg(alreadyInOrder, 0, 'f', 0), true);
         return;
     }
     if (!orders_.getCurrentOrder()) {
@@ -432,7 +420,7 @@ void PosTab::refreshCart()
         const QString values[] = {
             QString::number(product->getId()), QString::fromStdString(product->getName()),
             QString("PKR %1").arg(product->getPrice(), 0, 'f', 2),
-            QString::number(item.getQuantity(), 'f', product->getUnit() == "weight" ? 1 : 0),
+            QString::number(item.getQuantity(), 'f', 0),
             QString("PKR %1").arg(tax, 0, 'f', 2),
             QString("PKR %1").arg(discount, 0, 'f', 2),
             QString("PKR %1").arg(std::max(0.0, lineSubtotal + tax - discount), 0, 'f', 2)
