@@ -206,8 +206,11 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
     paymentMode_ = new QComboBox(paymentCard);
     paymentMode_->addItems({"Cash", "Card", "Wallet"});
     paymentMode_->setMinimumHeight(38);
-    merchantName_ = new QLineEdit(paymentCard);
-    merchantName_->setPlaceholderText("Required for card or wallet");
+    merchantName_ = new QComboBox(paymentCard);
+    merchantName_->setEditable(true);
+    merchantName_->setInsertPolicy(QComboBox::NoInsert);
+    merchantName_->setMinimumHeight(38);
+    merchantName_->lineEdit()->setPlaceholderText("Not needed for cash");
     paymentButton_ = new QPushButton("Complete payment", paymentCard);
     paymentButton_->setObjectName("primaryButton");
     paymentForm->addRow("Amount received", paymentInput_);
@@ -236,19 +239,53 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
         if (row < 0) { setStatus("Select a product row first.", true); return; }
         auto product = products_.findById(cartTable_->item(row, 0)->text().toInt());
         if (!product) { setStatus("Product is no longer available.", true); return; }
+        if (!reopenPlacedOrder()) return;
         const auto result = orders_.removeProductFromOrder(product->getBarcode());
         setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
         refreshCart();
     });
     connect(updateButton, &QPushButton::clicked, this, [this] {
-        const int row = cartTable_->currentRow();
-        if (row < 0) { setStatus("Select a product row first.", true); return; }
-        auto product = products_.findById(cartTable_->item(row, 0)->text().toInt());
+        if (!orders_.getCurrentOrder()) { setStatus("There is no active order.", true); return; }
+        int row = cartTable_->currentRow();
+        if (row < 0 && cartTable_->rowCount() == 1) row = 0;   // only one item: no need to select it
+        if (row < 0 || !cartTable_->item(row, 0)) { setStatus("Select a product row first.", true); return; }
+        const auto product = products_.findById(cartTable_->item(row, 0)->text().toInt());
         if (!product) { setStatus("Product is no longer available.", true); return; }
-        const double quantity = quantityInput_->value();
+
+        // A placed (locked) order must be reopened before it can be changed
+        if (!reopenPlacedOrder()) return;
+        const Order *order = orders_.getCurrentOrder();
+        if (!order) return;
+
+        // Ask for the NEW total quantity (lower = reduce, higher = increase)
+        const bool weighted = product->getUnit() == "weight";
+        const double currentQty = order->getItemQuantity(product->getId());
+        const QString prompt = QString("New quantity for %1\n(currently %2, available stock %3):")
+                                   .arg(QString::fromStdString(product->getName()))
+                                   .arg(currentQty, 0, 'f', weighted ? 1 : 0)
+                                   .arg(product->getQuantity(), 0, 'f', weighted ? 1 : 0);
+        bool ok = false;
+        double quantity = 0.0;
+        if (weighted) {
+            quantity = QInputDialog::getDouble(this, "Update quantity", prompt, currentQty,
+                                               0.1, std::max(0.1, product->getQuantity()), 1, &ok);
+        } else {
+            const int maxQty = std::max(1, static_cast<int>(std::floor(product->getQuantity())));
+            quantity = QInputDialog::getInt(this, "Update quantity", prompt,
+                                            static_cast<int>(std::lround(currentQty)), 1, maxQty, 1, &ok);
+        }
+        if (!ok) { refreshCart(); return; }   // cancelled
+
         const auto result = orders_.updateProductQuantity(product->getBarcode(), quantity);
-        setStatus(QString::fromLocal8Bit(describe(result)), result != OrderResult::Success);
+        if (result == OrderResult::Success)
+            setStatus(QString("Quantity updated to %1.").arg(quantity, 0, 'f', weighted ? 1 : 0));
+        else
+            setStatus(QString::fromLocal8Bit(describe(result)), true);
         refreshCart();
+    });
+    // Double-clicking a row does the same as the Update quantity button
+    connect(cartTable_, &QTableWidget::cellDoubleClicked, this, [updateButton](int, int) {
+        updateButton->click();
     });
     connect(clearButton, &QPushButton::clicked, this, [this] {
         if (QMessageBox::question(this, "Clear order", "Discard the current order?") != QMessageBox::Yes)
@@ -264,8 +301,27 @@ PosTab::PosTab(ProductManager &products, OrderManager &orders,
         setStatus("Current order cleared.");
     });
     connect(paymentMode_, &QComboBox::currentTextChanged, this, [this](const QString &selected) {
-        merchantName_->setEnabled(selected != "Cash");
-        if (selected == "Cash") merchantName_->clear();
+        const bool cash = (selected == "Cash");
+        merchantName_->clear();                       // removes the old list and any typed text
+        merchantName_->setEnabled(!cash);
+        if (cash) {
+            paymentInput_->setReadOnly(false);
+            merchantName_->lineEdit()->setPlaceholderText("Not needed for cash");
+            return;
+        }
+        if (selected == "Card")
+            merchantName_->addItems({"ABL", "HBL", "MCB", "UBL", "Meezan Bank", "Bank Alfalah",
+                                     "Askari Bank", "Faysal Bank", "Standard Chartered"});
+        else
+            merchantName_->addItems({"JazzCash", "Easypaisa", "SadaPay", "NayaPay", "UPaisa"});
+        merchantName_->setCurrentIndex(-1);           // nothing chosen yet
+        merchantName_->lineEdit()->setPlaceholderText(selected == "Card" ? "Select or type the bank"
+                                                                         : "Select or type the wallet");
+        // Card / wallet pay the exact amount due, so fill it in and lock it
+        if (const Order *current = orders_.getCurrentOrder())
+            paymentInput_->setValue(billing_.calculateTotalPayable(*current));
+        paymentInput_->setReadOnly(true);
+        merchantName_->setFocus();
     });
     merchantName_->setEnabled(false);
     refreshCart();
@@ -460,12 +516,16 @@ void PosTab::completePayment()
     PaymentMode paymentMode = PaymentMode::Cash;
     if (paymentMode_->currentText() == "Card") paymentMode = PaymentMode::Card;
     else if (paymentMode_->currentText() == "Wallet") paymentMode = PaymentMode::Wallet;
-    if (paymentMode != PaymentMode::Cash && merchantName_->text().trimmed().isEmpty()) {
-        setStatus("Enter the card or wallet merchant name.", true);
+    const std::string merchant = merchantName_->currentText().trimmed().toStdString();
+    if (paymentMode != PaymentMode::Cash && merchant.empty()) {
+        setStatus(paymentMode == PaymentMode::Card
+                      ? QString("Select the bank (merchant) from the Merchant list, e.g. HBL.")
+                      : QString("Select the wallet (merchant) from the Merchant list, e.g. JazzCash."), true);
+        merchantName_->setFocus();
         return;
     }
     const Order orderSnapshot = *order;
-    billing_.setPaymentDetails(paymentInput_->value(), paymentMode, merchantName_->text().toStdString());
+    billing_.setPaymentDetails(paymentInput_->value(), paymentMode, merchant);
     std::optional<Bill> bill;
     const BillingResult result = billing_.finalizeBill(bill);
     if (result != BillingResult::Success || !bill) {
@@ -486,13 +546,14 @@ void PosTab::completePayment()
         return;
     }
     Order shownOrder = orderSnapshot;
-    shownOrder.setPayment(paymentInput_->value(), paymentMode, merchantName_->text().toStdString());
+    shownOrder.setPayment(paymentInput_->value(), paymentMode, merchant);
     BillDialog dialog(*bill, shownOrder, products_, this);
     dialog.exec();
     products_.loadProducts();
     paymentInput_->setValue(0.0);
     merchantName_->clear();
     paymentMode_->setCurrentIndex(0);
+    paymentInput_->setReadOnly(false);
     quantityInput_->setRange(1.0, 1000000.0);
     quantityInput_->setDecimals(0);
     quantityInput_->setSingleStep(1.0);
@@ -504,6 +565,30 @@ void PosTab::completePayment()
     addButton_->setEnabled(false);
     refreshCart();
     setStatus("Payment complete. Bill saved successfully.");
+}
+
+bool PosTab::reopenPlacedOrder()
+{
+    const Order *order = orders_.getCurrentOrder();
+    if (!order || !order->isLocked())
+        return true;                                    // already editable
+    if (QMessageBox::question(this, "Order already placed",
+                              "This order is already placed for payment.\nReopen it so it can be changed?") != QMessageBox::Yes)
+        return false;
+
+    // Copy the items, discard the placed order (and its saved records), start a new editable one
+    const Order snapshot = *order;
+    billing_.cancelCurrentOrder();
+    if (orders_.createOrder(snapshot.getCustomerName(), snapshot.getCustomerContact()) != OrderResult::Success) {
+        setStatus("Could not reopen the order.", true);
+        refreshCart();
+        return false;
+    }
+    for (const OrderItem &item : snapshot.getItems())
+        orders_.addProductToOrder(item.getBarcode(), item.getQuantity());
+    refreshCart();
+    setStatus("Order reopened for editing. Place it again when ready.");
+    return true;
 }
 
 void PosTab::setStatus(const QString &message, bool error)

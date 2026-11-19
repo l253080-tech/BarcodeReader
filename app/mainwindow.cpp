@@ -144,9 +144,6 @@ MainWindow::MainWindow(QWidget *parent)
     addNavButton("▤   Barcode generator", 1);
     addNavButton("⌕   Barcode reader", 2);
     sideLayout->addStretch();
-    auto *sidebarFoot = new QLabel("BARCODE READER\nIncrement 2 · Checkout", sidebar);
-    sidebarFoot->setObjectName("sidebarFoot");
-    sideLayout->addWidget(sidebarFoot);
     shellLayout->addWidget(sidebar);
     shellLayout->addWidget(content, 1);
 

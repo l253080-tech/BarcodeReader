@@ -46,8 +46,8 @@ BillDialog::BillDialog(const Bill &bill, const Order &order,
     for (const auto &item : bill_.getItems()) {
         const auto product = products_.findByBarcode(item.barcode);
         const QString name = product
-            ? QString::fromStdString(product->getAcronym() + " · " + product->getName())
-            : QString::fromStdString(item.productAcronym);
+                                 ? QString::fromStdString(product->getAcronym() + " · " + product->getName())
+                                 : QString::fromStdString(item.productAcronym);
         const int row = itemsTable_->rowCount();
         itemsTable_->insertRow(row);
         const QString cells[] = {
@@ -64,15 +64,20 @@ BillDialog::BillDialog(const Bill &bill, const Order &order,
     layout->addWidget(itemsTable_, 1);
 
     QString totalsText = QString("Subtotal: PKR %1<br>Total tax: PKR %2<br>Total discount: PKR %3<br>"
-                "<b>Total payable: PKR %4</b><br>Payment status: %5")
-            .arg(bill_.getTotalWithoutTax(), 0, 'f', 2)
-            .arg(bill_.getTotalTax(), 0, 'f', 2)
-            .arg(bill_.getTotalDiscount(), 0, 'f', 2)
-            .arg(bill_.getTotalPayable(), 0, 'f', 2)
-            .arg(QString::fromStdString(bill_.getPaymentStatus()));
+                                 "<b>Total payable: PKR %4</b><br>Payment status: %5")
+                             .arg(bill_.getTotalWithoutTax(), 0, 'f', 2)
+                             .arg(bill_.getTotalTax(), 0, 'f', 2)
+                             .arg(bill_.getTotalDiscount(), 0, 'f', 2)
+                             .arg(bill_.getTotalPayable(), 0, 'f', 2)
+                             .arg(QString::fromStdString(bill_.getPaymentStatus()));
     if (order_.getPaymentMode() == PaymentMode::Cash)
         totalsText += QString("<br>Change due: PKR %1")
-            .arg(std::max(0.0, order_.getPaymentAmount() - bill_.getTotalPayable()), 0, 'f', 2);
+                          .arg(std::max(0.0, order_.getPaymentAmount() - bill_.getTotalPayable()), 0, 'f', 2);
+    if (order_.getPaymentMode() != PaymentMode::NotSet) {
+        totalsText += QString("<br>Paid by: %1").arg(QString::fromStdString(toString(order_.getPaymentMode())));
+        if (!order_.getMerchantName().empty())
+            totalsText += " (" + QString::fromStdString(order_.getMerchantName()).toHtmlEscaped() + ")";
+    }
     summaryLabel_ = new QLabel(
         totalsText, this);
     summaryLabel_->setTextFormat(Qt::RichText);
@@ -89,32 +94,38 @@ BillDialog::BillDialog(const Bill &bill, const Order &order,
 QString BillDialog::printableText() const
 {
     QString text = QString("<h1>Counterpoint · Retail POS</h1><p>Bill %1 · Order %2<br>Customer: %3<br>Date: %4 %5</p><table border='1' cellspacing='0' cellpadding='5'><tr><th>Product</th><th>Unit price</th><th>Discount</th><th>Qty</th><th>Tax</th><th>Line total</th></tr>")
-        .arg(QString::fromStdString(bill_.getBillId()))
-        .arg(QString::fromStdString(order_.getOrderId()))
-        .arg(QString::fromStdString(bill_.getCustomerName()))
-        .arg(QString::fromStdString(order_.getOrderDate()))
-        .arg(QString::fromStdString(order_.getOrderTime()));
+                       .arg(QString::fromStdString(bill_.getBillId()))
+                       .arg(QString::fromStdString(order_.getOrderId()))
+                       .arg(QString::fromStdString(bill_.getCustomerName()))
+                       .arg(QString::fromStdString(order_.getOrderDate()))
+                       .arg(QString::fromStdString(order_.getOrderTime()));
     for (const auto &item : bill_.getItems()) {
         const auto product = products_.findByBarcode(item.barcode);
         const QString name = product ? QString::fromStdString(product->getName())
                                      : QString::fromStdString(item.productAcronym);
         text += QString("<tr><td>%1</td><td>PKR %2</td><td>PKR %3</td><td>%4</td><td>PKR %5</td><td>PKR %6</td></tr>")
-            .arg(name.toHtmlEscaped())
-            .arg(item.unitPriceWithoutTax, 0, 'f', 2)
-            .arg(item.discountPerUnit, 0, 'f', 2)
-            .arg(item.quantity, 0, 'f', 2)
-            .arg(item.getLineTax(), 0, 'f', 2)
-            .arg(std::max(0.0, item.getLinePayable()), 0, 'f', 2);
+                    .arg(name.toHtmlEscaped())
+                    .arg(item.unitPriceWithoutTax, 0, 'f', 2)
+                    .arg(item.discountPerUnit, 0, 'f', 2)
+                    .arg(item.quantity, 0, 'f', 2)
+                    .arg(item.getLineTax(), 0, 'f', 2)
+                    .arg(std::max(0.0, item.getLinePayable()), 0, 'f', 2);
     }
     text += QString("</table><p>Subtotal: PKR %1<br>Tax: PKR %2<br>Discount: PKR %3<br><b>Total payable: PKR %4</b><br>Payment status: %5</p>")
-        .arg(bill_.getTotalWithoutTax(), 0, 'f', 2)
-        .arg(bill_.getTotalTax(), 0, 'f', 2)
-        .arg(bill_.getTotalDiscount(), 0, 'f', 2)
-        .arg(bill_.getTotalPayable(), 0, 'f', 2)
-        .arg(QString::fromStdString(bill_.getPaymentStatus()));
+                .arg(bill_.getTotalWithoutTax(), 0, 'f', 2)
+                .arg(bill_.getTotalTax(), 0, 'f', 2)
+                .arg(bill_.getTotalDiscount(), 0, 'f', 2)
+                .arg(bill_.getTotalPayable(), 0, 'f', 2)
+                .arg(QString::fromStdString(bill_.getPaymentStatus()));
     if (order_.getPaymentMode() == PaymentMode::Cash)
         text += QString("<p>Change due: PKR %1</p>")
-            .arg(std::max(0.0, order_.getPaymentAmount() - bill_.getTotalPayable()), 0, 'f', 2);
+                    .arg(std::max(0.0, order_.getPaymentAmount() - bill_.getTotalPayable()), 0, 'f', 2);
+    if (order_.getPaymentMode() != PaymentMode::NotSet) {
+        text += QString("<p>Paid by: %1").arg(QString::fromStdString(toString(order_.getPaymentMode())));
+        if (!order_.getMerchantName().empty())
+            text += " (" + QString::fromStdString(order_.getMerchantName()).toHtmlEscaped() + ")";
+        text += "</p>";
+    }
     return text;
 }
 

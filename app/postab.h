@@ -42,6 +42,7 @@ private:
     void completePayment();
     void setStatus(const QString &message, bool error = false);
     bool persistOrder(const Order &order);
+    bool reopenPlacedOrder();
 
     ProductManager &products_;
     OrderManager &orders_;
@@ -51,7 +52,7 @@ private:
     QLineEdit *barcodeInput_ = nullptr;
     QLineEdit *customerName_ = nullptr;
     QLineEdit *customerContact_ = nullptr;
-    QLineEdit *merchantName_ = nullptr;
+    QComboBox *merchantName_ = nullptr;
     QDoubleSpinBox *quantityInput_ = nullptr;
     QDoubleSpinBox *paymentInput_ = nullptr;
     QComboBox *paymentMode_ = nullptr;
